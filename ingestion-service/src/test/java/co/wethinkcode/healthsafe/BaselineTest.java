@@ -1,4 +1,13 @@
 package co.wethinkcode.healthsafe;
 
-public class BaselineTest {
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+class BaselineTest {
+
+    @Test
+    void testFrameworkWiredUp() {
+        assertTrue(true, "baseline smoke test");
+    }
 }
