@@ -31,7 +31,7 @@ public class WardCsvLoaderTest {
     void parsesAllRowsWithoutCrashing() throws Exception {
         List<WardRecord> result = loadSample();
         assertNotNull(result);
-        assertEquals(16, result.size());
+        assertEquals(17, result.size());
     }
 
     // Deduplication

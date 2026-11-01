@@ -12,6 +12,8 @@ public final class WardCleaningUtils {
             "", "n/a", "na", "tbd", "unknown", "-", "nan", "null", "none", "?"
     );
 
+    private static final Set<String> ACRONYMS = Set.of("ICU", "ER", "OR", "MRI", "CT");
+
     /** Known regional-spelling / synonym variants for departments. */
     private static final Map<String, String> DEPARTMENT_ALIASES = Map.of(
             "Pediatrics", "Paediatrics",
@@ -40,8 +42,12 @@ public final class WardCleaningUtils {
             if (i > 0) sb.append(' ');
             String w = words[i];
             if (w.isEmpty()) continue;
-            if (w.length() >= 2 && w.length() <= 5 && w.equals(w.toUpperCase())) {
-                sb.append(w); // acronym
+
+            String upper = w.toUpperCase();
+            if (ACRONYMS.contains(upper)) {
+                sb.append(upper);                            // known acronym → force uppercase
+            } else if (w.length() >= 2 && w.length() <= 5 && w.equals(upper)) {
+                sb.append(upper);                            // looks like an acronym (all-caps input)
             } else {
                 sb.append(Character.toUpperCase(w.charAt(0)));
                 if (w.length() > 1) sb.append(w.substring(1).toLowerCase());
