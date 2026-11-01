@@ -1,87 +1,105 @@
 package co.wethinkcode.healthsafe;
 
-import co.wethinkcode.healthsafe.domain.Ward;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import co.wethinkcode.healthsafe.api.WardRoutes;
+import co.wethinkcode.healthsafe.application.StaffingUpdateService;
+import co.wethinkcode.healthsafe.application.WardCatalogService;
+import co.wethinkcode.healthsafe.infrastructure.http.IngestionWardClient;
+import co.wethinkcode.healthsafe.infrastructure.messaging.JmsStaffingEventConsumer;
 import io.javalin.Javalin;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-
+/**
+ * Entry point for Ward Service.
+ *
+ * This class wires together the API, application services and infrastructure
+ * adapters. It does not contain the actual ward lookup or event-processing
+ * business rules.
+ */
 public class WardServiceApp {
 
-    static final String INGESTION_URL = "http://localhost:7030/wards";
+    public static void main(String[] args) throws Exception {
 
-    private static final ObjectMapper JSON = new ObjectMapper();
-    private static final Map<String, Ward> CACHE = new LinkedHashMap<>();
+        // Allow the Ingestion Service address to be changed without
+        // changing application code.
+        String ingestionUrl = System.getenv()
+                .getOrDefault(
+                        "INGESTION_SERVICE_URL",
+                        "http://localhost:7030/wards"
+                );
 
-    public static void main(String[] args) {
-        loadFromIngestionWithRetry(5, 2_000);
+        // Create the client and application service responsible for ward data.
+        WardCatalogService wardCatalog =
+                new WardCatalogService(new IngestionWardClient(ingestionUrl));
 
-        Javalin app = Javalin.create().start(7031);
+        /*
+         * Ingestion Service may take slightly longer to start than Ward Service.
+         * Retry the initial catalogue load up to five times, with a two-second
+         * pause between attempts, instead of immediately terminating.
+         */
+        boolean loaded = false;
 
-        app.get("/health", ctx -> ctx.result("OK"));
+        for (int attempt = 1; attempt <= 5; attempt++) {
+            try {
+                wardCatalog.refresh();
+                loaded = true;
+                break;
 
-        app.get("/wards", ctx -> ctx.json(new ArrayList<>(CACHE.values())));
+            } catch (RuntimeException e) {
+                System.err.printf(
+                        "[ward-service] ingestion attempt %d/5 failed: %s%n",
+                        attempt,
+                        e.getMessage()
+                );
 
-        app.get("/wards/{id}", ctx -> {
-            String id = ctx.pathParam("id").trim().toUpperCase();
-            Ward w = CACHE.get(id);
-            if (w == null) {
-                ctx.status(404).json(Map.of("error", "unknown ward: " + id));
-            } else {
-                ctx.json(w);
+                if (attempt < 5) {
+                    try {
+                        Thread.sleep(2_000);
+
+                    } catch (InterruptedException interrupted) {
+                        // Do not swallow a shutdown or cancellation signal.
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
             }
-        });
-
-        app.get("/admin/refresh", ctx -> {
-            boolean ok = loadFromIngestion();
-            ctx.status(ok ? 200 : 503)
-                    .json(Map.of("refreshed", ok, "size", CACHE.size()));
-        });
-    }
-
-    private static void loadFromIngestionWithRetry(int attempts, long sleepMs) {
-        for (int i = 1; i <= attempts; i++) {
-            if (loadFromIngestion()) return;
-            System.err.printf("[ward-service] ingestion load attempt %d/%d failed; retrying in %dms%n",
-                    i, attempts, sleepMs);
-            try { Thread.sleep(sleepMs); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
         }
-        System.err.println("[ward-service] giving up on ingestion; starting with empty cache");
-    }
 
-    static boolean loadFromIngestion() {
-        try {
-            HttpClient client = HttpClient.newBuilder()
-                    .connectTimeout(Duration.ofSeconds(3))
-                    .build();
-            HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create(INGESTION_URL))
-                    .timeout(Duration.ofSeconds(5))
-                    .GET().build();
-            HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 200) {
-                System.err.println("[ward-service] ingestion returned " + resp.statusCode());
-                return false;
-            }
-            List<Ward> wards = JSON.readValue(resp.body(), new TypeReference<List<Ward>>() {});
-            synchronized (CACHE) {
-                CACHE.clear();
-                for (Ward w : wards) CACHE.put(w.getWardId(), w);
-            }
-            System.out.printf("[ward-service] cached %d wards from ingestion%n", CACHE.size());
-            return true;
-        } catch (Exception e) {
-            System.err.println("[ward-service] ingestion call failed: " + e.getMessage());
-            return false;
+        /*
+         * The existing startup behaviour allows the service to start even
+         * when the catalogue could not be loaded. In that case, ward lookups
+         * will not succeed until a later POST /admin/refresh works.
+         */
+        if (!loaded) {
+            System.err.println(
+                    "[ward-service] starting with an empty ward catalogue"
+            );
         }
+
+        // Create the application component that processes incoming events.
+        StaffingUpdateService staffingUpdates =
+                new StaffingUpdateService();
+
+        /*
+         * Connect to ActiveMQ and register the durable subscriber.
+         * The broker must be running before Ward Service starts.
+         */
+        JmsStaffingEventConsumer consumer =
+                new JmsStaffingEventConsumer(staffingUpdates);
+
+        // Create the REST application and register its endpoints.
+        Javalin app = Javalin.create();
+
+        new WardRoutes(wardCatalog, staffingUpdates).register(app);
+
+        // Start the Ward Service HTTP API on port 7031.
+        app.start(7031);
+
+        /*
+         * Release the HTTP server and JMS resources during application shutdown.
+         * This prevents the consumer connection from being left open.
+         */
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            app.stop();
+            consumer.close();
+        }));
     }
 }
