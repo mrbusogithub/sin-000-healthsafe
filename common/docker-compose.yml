@@ -1,7 +1,27 @@
-version: "3.8"
 services:
   activemq:
+    # Pin the broker version so developers run the same version locally.
     image: apache/activemq-classic:5.18.3
+
+    # Give the container a predictable name for Docker commands and logs.
+    container_name: healthsafe-activemq
+
+    # Restart the broker automatically unless a developer explicitly stops it.
+    restart: unless-stopped
+
     ports:
-      - "61616:61616"   # OpenWire (client connections)
-      - "8161:8161"     # Web console
+      # OpenWire port used by the Java services to publish and consume messages.
+      # Format: HOST_PORT:CONTAINER_PORT
+      - "61616:61616"
+
+      # Web console port used by developers to inspect broker destinations.
+      - "8161:8161"
+
+    volumes:
+      # Keep broker data outside the container's writable filesystem.
+      # This allows stored messages and broker data to survive container replacement.
+      - activemq-data:/opt/apache-activemq/data
+
+volumes:
+  # Docker manages this named volume independently of the broker container.
+  activemq-data:
