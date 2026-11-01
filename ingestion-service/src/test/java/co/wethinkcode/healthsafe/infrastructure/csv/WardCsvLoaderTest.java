@@ -1,5 +1,6 @@
-package co.wethinkcode.healthsafe;
+package co.wethinkcode.healthsafe.infrastructure.csv;
 
+import co.wethinkcode.healthsafe.domain.WardRecord;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

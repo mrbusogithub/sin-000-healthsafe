@@ -1,4 +1,4 @@
-package co.wethinkcode.healthsafe;
+package co.wethinkcode.healthsafe.domain;
 
 /**
  * Clean, normalized ward record. This is the JSON shape exposed by GET /wards

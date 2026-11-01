@@ -1,4 +1,4 @@
-package co.wethinkcode.healthsafe;
+package co.wethinkcode.healthsafe.cleaning;
 
 import org.junit.jupiter.api.Test;
 
