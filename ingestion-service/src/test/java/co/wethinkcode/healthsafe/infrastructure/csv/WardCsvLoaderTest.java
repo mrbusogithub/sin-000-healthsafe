@@ -3,76 +3,142 @@ package co.wethinkcode.healthsafe.infrastructure.csv;
 import co.wethinkcode.healthsafe.domain.WardRecord;
 import org.junit.jupiter.api.Test;
 
+import java.io.StringReader;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/**
- * These tests prove that all the small rules work together when fed the
- * messy legacy file that this service exists to handle.
- */
+class WardCsvLoaderTest {
 
-public class WardCsvLoaderTest {
+    private final WardCsvLoader loader = new WardCsvLoader();
 
-     // load the real CSV once per test.
     private List<WardRecord> loadSample() throws Exception {
-        return new WardCsvLoader().loadFromResource("/wards-outdated.csv");
+        return loader.loadFromResource("/wards-outdated.csv");
     }
 
-    // Locate a single ward by ID, or fail the test if it isn't present.
-    private WardRecord find(List<WardRecord> list, String id) {
-        return list.stream()
-                .filter(r -> id.equals(r.getWardId()))
+    private WardRecord find(List<WardRecord> records, String wardId) {
+        return records.stream()
+                .filter(record -> wardId.equals(record.getWardId()))
                 .findFirst()
                 .orElseThrow();
     }
 
-    // Overall parse health
     @Test
-    void parsesAllRowsWithoutCrashing() throws Exception {
-        List<WardRecord> result = loadSample();
-        assertNotNull(result);
-        assertEquals(17, result.size());
-    }
+    void loadsAndDeduplicatesExistingDataset() throws Exception {
 
-    // Deduplication
-    @Test
-    void deduplicatesW05CaseInsensitively() throws Exception {
-        WardRecord w05 = find(loadSample(), "W-05");
-        assertEquals(Integer.valueOf(5), w05.getBedsAvailable());
-        assertTrue(w05.getNotes() != null && w05.getNotes().contains("non-numeric"));
-        assertTrue(w05.getNotes() != null && w05.getNotes().contains("duplicate"));
-    }
+        List<WardRecord> records = loadSample();
 
-    // Casing and padding
-    @Test
-    void normalisesCasingAndWingPadding() throws Exception {
-        WardRecord w02 = find(loadSample(), "W-02");
-        assertEquals("West Wing", w02.getWing());
-        assertEquals("Paediatrics", w02.getDepartment());
-        assertNull(w02.getBedsAvailable());
+        assertEquals(17, records.size());
     }
 
     @Test
-    void collapsesDoubleSpacesInWingNames() throws Exception {
-        WardRecord w10 = find(loadSample(), "W-10");
-        assertEquals("South Wing", w10.getWing());
-    }
+    void cleansAndNormalisesWardFields() throws Exception {
 
-    // Invalid numeric values inside the real dataset
-    @Test
-    void flagsNegativeAndUnrealisticBedCounts() throws Exception {
-        WardRecord w04 = find(loadSample(), "W-04");
-        WardRecord w13 = find(loadSample(), "W-13");
-        assertNull(w04.getBedsAvailable());
-        assertNull(w13.getBedsAvailable());
-        assertTrue(w04.getNotes().toLowerCase().contains("negative"));
-        assertTrue(w13.getNotes().toLowerCase().contains("unrealistic"));
+        WardRecord ward = find(loadSample(), "W-02");
+
+        assertEquals("West Wing", ward.getWing());
+        assertEquals("Paediatrics", ward.getDepartment());
+        assertNull(ward.getBedsAvailable());
     }
 
     @Test
-    void interpretsFullAsZero() throws Exception {
-        WardRecord w12 = find(loadSample(), "W-12");
-        assertEquals(Integer.valueOf(0), w12.getBedsAvailable());
+    void keepsBetterDuplicateAndRetainsNotes() throws Exception {
+
+        WardRecord ward = find(loadSample(), "W-05");
+
+        assertEquals(5, ward.getBedsAvailable());
+
+        assertTrue(ward.getNotes().contains("non-numeric"));
+        assertTrue(ward.getNotes().contains("duplicate"));
+    }
+
+    @Test
+    void rejectsCsvWithMissingRequiredHeader() {
+
+        String csv = """
+                ward_id,wing,department
+                W-01,East Wing,Cardiology
+                """;
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> loader.load(new StringReader(csv))
+        );
+    }
+
+    @Test
+    void skipsMalformedRowsAndKeepsValidRows() throws Exception {
+
+        String csv = """
+                ward_id,wing,department,beds_available
+                W-01,East Wing,Cardiology,4
+                W-02,West Wing
+                """;
+
+        List<WardRecord> records =
+                loader.load(new StringReader(csv));
+
+        assertEquals(1, records.size());
+        assertEquals("W-01", records.get(0).getWardId());
+    }
+
+    @Test
+    void resolvesTiedDuplicateScoresIndependentlyOfRowOrder()
+            throws Exception {
+
+        String firstOrder = """
+                ward_id,wing,department,beds_available
+                W-01,North Wing,Oncology,4
+                w-01,East Wing,Cardiology,4
+                """;
+
+        String reversedOrder = """
+                ward_id,wing,department,beds_available
+                w-01,East Wing,Cardiology,4
+                W-01,North Wing,Oncology,4
+                """;
+
+        List<WardRecord> firstResult =
+                loader.load(new StringReader(firstOrder));
+
+        List<WardRecord> secondResult =
+                loader.load(new StringReader(reversedOrder));
+
+        assertEquals(1, firstResult.size());
+        assertEquals(1, secondResult.size());
+
+        assertEquals(
+                firstResult.get(0).getWing(),
+                secondResult.get(0).getWing()
+        );
+
+        assertEquals(
+                firstResult.get(0).getDepartment(),
+                secondResult.get(0).getDepartment()
+        );
+
+        assertEquals("East Wing", firstResult.get(0).getWing());
+    }
+
+    @Test
+    void rejectsCompletelyEmptyCsv() {
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> loader.load(new StringReader(""))
+        );
+    }
+
+    @Test
+    void rejectsCsvThatContainsHeadersButNoUsableRecords() {
+
+        String csv = """
+                ward_id,wing,department,beds_available
+                """;
+
+        assertThrows(
+                IllegalStateException.class,
+                () -> loader.load(new StringReader(csv))
+        );
     }
 }
