@@ -51,4 +51,10 @@ public class WardCsvLoaderTest {
         assertEquals("Paediatrics", w02.getDepartment());
         assertNull(w02.getBedsAvailable());
     }
+
+    @Test
+    void collapsesDoubleSpacesInWingNames() throws Exception {
+        WardRecord w10 = find(loadSample(), "W-10");
+        assertEquals("South Wing", w10.getWing());
+    }
 }
