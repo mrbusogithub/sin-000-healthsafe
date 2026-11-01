@@ -33,4 +33,22 @@ public class WardCsvLoaderTest {
         assertNotNull(result);
         assertEquals(16, result.size());
     }
+
+    // Deduplication
+    @Test
+    void deduplicatesW05CaseInsensitively() throws Exception {
+        WardRecord w05 = find(loadSample(), "W-05");
+        assertEquals(Integer.valueOf(5), w05.getBedsAvailable());
+        assertTrue(w05.getNotes() != null && w05.getNotes().contains("non-numeric"));
+        assertTrue(w05.getNotes() != null && w05.getNotes().contains("duplicate"));
+    }
+
+    // Casing and padding
+    @Test
+    void normalisesCasingAndWingPadding() throws Exception {
+        WardRecord w02 = find(loadSample(), "W-02");
+        assertEquals("West Wing", w02.getWing());
+        assertEquals("Paediatrics", w02.getDepartment());
+        assertNull(w02.getBedsAvailable());
+    }
 }
