@@ -44,10 +44,10 @@ and runs (`/health` returns `OK`); your job is to fill in the `TODO`s.
    and `staffing-service` per the [Integration contracts](#integration-contracts)
    below: wards/departments lookup, Emergency Status tracking, and on-call
    scheduling that calls the other two services synchronously over HTTP.
-3. **MQ decoupling** (stretch) — replace the synchronous call from `ward-service`
-   to `staffing-service` with the `staffing-events-topic` broadcast described in
-   [common/README.md](common/README.md), so staffing updates reach `ward-service`
-   asynchronously instead.
+3. **MQ decoupling** — `staffing-service` publishes schedule updates to
+   `staffing-events-topic`, and `ward-service` subscribes to the topic.
+   Ward Service updates its internal staffing state asynchronously.
+   See [common/README.md](common/README.md).
 4. **Alerting** (stretch) — have `ward-service` publish to the
    `equipment-failure-queue` when it detects an equipment failure, and implement
    `equipment-alert-service` as the guaranteed-delivery consumer (see
@@ -73,7 +73,8 @@ consume them.
 | `staffing-service` | `ward-service` | `GET /wards/{id}` → `404` if unknown | Validate the ward before scheduling |
 | `staffing-service` | `alert-level-service` | `GET /alert-level` → `{ "level": 0-8 }` | Read current Emergency Status to size the on-call schedule |
 | `staffing-service` | `ward-service` (topic, stage 3) | publish to `staffing-events-topic` | Broadcast a schedule/status change |
-| `ward-service` (topic, stage 3) | — | subscribe to `staffing-events-topic` | React to staffing updates without polling |
+| `staffing-service` | `ward-service` (topic) | publish to `staffing-events-topic` | Broadcast a generated staffing schedule |
+| `ward-service` (topic) | — | subscribe to `staffing-events-topic` | Update staffing state asynchronously |
 | `ward-service` (queue, stage 4) | `equipment-alert-service` | publish to `equipment-failure-queue` | Guarantee delivery of an equipment failure alert |
 
 ## Project structure

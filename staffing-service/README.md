@@ -39,13 +39,18 @@ java -jar target/staffing-service.jar
 
 Listens on port `7033`.
 
-## Test
+## REST endpoints
 
-No automated tests yet. Manually verify it's up:
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/health` | Service health |
+| GET | `/schedule/{wardId}` | Preview a schedule without publishing |
+| POST | `/schedule/{wardId}` | Generate a schedule and publish a staffing event |
 
-```
-curl http://localhost:7033/health   # -> OK
-```
+## Messaging
 
-To add real tests, add JUnit 5 + the Surefire plugin to `pom.xml`, put tests under
-`src/test/java/co/wethinkcode/healthsafe/`, and run `mvn test`.
+Publishes JSON staffing events to `staffing-events-topic` through
+`co.wethinkcode.healthsafe.mq.MqConfig`.
+
+The broker must be available before a schedule-generation request can
+complete successfully.

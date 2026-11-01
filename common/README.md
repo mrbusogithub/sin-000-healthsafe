@@ -1,64 +1,51 @@
-# common — Asynchronous Decoupling (MQ)
+# Common — ActiveMQ Infrastructure
 
 ## Overview
 
-Topic: `staffing-events-topic`
+HealthSafe uses Apache ActiveMQ Classic 5.18.3 for asynchronous communication.
 
-Staffing updates are broadcast as Events via the broker to decouple the frontend from the Staffing Service.
+- Broker: `tcp://localhost:61616`
+- Web console: `http://localhost:8161`
+- Web console credentials: `admin` / `admin`
+- Topic: `staffing-events-topic`
 
-Part of the [HealthSafe](../README.md) project. Holds the ActiveMQ broker shared
-by the services below — not a service itself, so it has no port of its own.
+## Publisher and subscriber
 
-- Producer: `staffing-service` (`../staffing-service`)
-- Consumer(s): ward-service
+- Publisher: `staffing-service`
+- Subscriber: `ward-service`
 
-Broker URL and topic name are shared via a common `co.wethinkcode.healthsafe.mq.MqConfig` class
-(`BROKER_URL`, `TOPIC`). It's identical in every participating service's own source
-tree — each service here is an independent Maven project with no shared parent pom,
-so the common package is duplicated rather than imported from one place.
+Staffing Service publishes a `STAFFING_SCHEDULE_UPDATED` event after a
+schedule is generated through `POST /schedule/{wardId}`.
 
-## Project structure
+Ward Service subscribes to the topic and updates its latest staffing
+information for the affected ward. It does not need to poll Staffing
+Service to receive these updates.
 
-```
-common/
-├── docker-compose.yml
-└── README.md
-```
+## Event contract
 
-This folder holds the broker config and notes only — the actual publish/subscribe
-code belongs in the producer/consumer services listed above (their poms already
-depend on `activemq-client`, and each already has
-`src/main/java/co/wethinkcode/healthsafe/mq/MqConfig.java`).
+Every message is JSON with the following fields:
 
-## Build
+| Field | Type | Description |
+|---|---|---|
+| eventId | String | Unique event identifier |
+| eventType | String | `STAFFING_SCHEDULE_UPDATED` |
+| schemaVersion | Integer | Contract version, currently 1 |
+| wardId | String | Ward affected |
+| department | String | Ward department |
+| alertLevel | Integer | Emergency status from 0 to 8 |
+| doctorsOnCall | Integer | Computed staffing requirement |
+| scheduleFor | String | Schedule period |
+| generatedAt | String | ISO-8601 timestamp |
 
-Nothing to build here directly — this folder just brings up the broker used by the
-services listed above.
+Messages are published with persistent delivery. Ward Service uses a
+durable topic subscription with a stable client ID and subscription name.
 
 ## Run
 
-```
+From this directory:
+
+```bash
 docker compose up -d
-```
-
-- Broker URL for clients: `tcp://localhost:61616`
-- Web console: http://localhost:8161 (default admin/admin)
-
-Then start the producer/consumer services as usual (`mvn package && java -jar ...`
-from their own directories at the project root).
-
-## Test
-
-```
-docker compose ps          # confirm the broker container is healthy
-```
-
-Once the TODOs below are implemented, verify end-to-end by publishing a message from
-`staffing-service` and confirming the consumer(s) receive it — e.g. via logs, or by
-watching the topic in the web console.
-
-## TODO
-
-- Add `activemq-client` publish logic to `staffing-service` on its stage/state-change endpoint.
-- Add `activemq-client` subscriber logic to consumer service(s) above, replacing any
-  direct synchronous calls to `staffing-service`.
+docker compose ps
+docker compose logs activemq
+docker compose down
