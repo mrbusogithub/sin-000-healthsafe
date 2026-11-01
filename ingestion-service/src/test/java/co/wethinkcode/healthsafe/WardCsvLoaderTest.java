@@ -57,4 +57,21 @@ public class WardCsvLoaderTest {
         WardRecord w10 = find(loadSample(), "W-10");
         assertEquals("South Wing", w10.getWing());
     }
+
+    // Invalid numeric values inside the real dataset
+    @Test
+    void flagsNegativeAndUnrealisticBedCounts() throws Exception {
+        WardRecord w04 = find(loadSample(), "W-04");
+        WardRecord w13 = find(loadSample(), "W-13");
+        assertNull(w04.getBedsAvailable());
+        assertNull(w13.getBedsAvailable());
+        assertTrue(w04.getNotes().toLowerCase().contains("negative"));
+        assertTrue(w13.getNotes().toLowerCase().contains("unrealistic"));
+    }
+
+    @Test
+    void interpretsFullAsZero() throws Exception {
+        WardRecord w12 = find(loadSample(), "W-12");
+        assertEquals(Integer.valueOf(0), w12.getBedsAvailable());
+    }
 }
