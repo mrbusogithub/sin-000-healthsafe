@@ -1,4 +1,4 @@
-package co.wethinkcode.healthsafe;
+package co.wethinkcode.healthsafe.domain;
 
 /** Mirrors the JSON shape returned by ingestion-service GET /wards. */
 public class Ward {

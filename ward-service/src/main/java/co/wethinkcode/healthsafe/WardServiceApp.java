@@ -1,5 +1,6 @@
 package co.wethinkcode.healthsafe;
 
+import co.wethinkcode.healthsafe.domain.Ward;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.javalin.Javalin;
