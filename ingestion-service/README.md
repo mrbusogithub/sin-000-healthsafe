@@ -1,95 +1,201 @@
-# IngestionServiceApp
+# Ingestion Service
 
-## Overview
+**Port:** `7030`  
+**Main class:** `co.wethinkcode.healthsafe.IngestionServiceApp`
 
-Parses and cleans `wards-outdated.csv`, a messy legacy export of wards, wings, and specialist departments data, and is the
-first stop in the HealthSafe pipeline. Independent Maven module, no parent pom.
+## 1. Purpose
 
-Part of the [HealthSafe](../README.md) project.
+Ingestion Service loads the legacy ward CSV file, cleans inconsistent values,
+validates records, resolves duplicate ward IDs and exposes the cleaned records
+through a REST API.
 
-REST: exposes the cleaned records for `ward-service` (`../ward-service`) to
-consume — see [Integration contracts](../README.md#integration-contracts) in the
-root README for the endpoint shape.
+It is the source of the ward catalogue used by Ward Service and Staffing Service.
 
-## Example: one row cleaned
+## 2. Input dataset
 
-Input (`wards-outdated.csv`, row 6):
+The source file is:
 
+`src/main/resources/wards-outdated.csv`
+
+Expected CSV columns:
+
+| Column | Description |
+|---|---|
+| `ward_id` | Ward identifier |
+| `Wing` | Ward wing |
+| `department` | Specialist department |
+| `beds_available` | Number of available beds |
+
+The loader requires all four columns. Header order can change because fields
+are located by their names rather than fixed positions.
+
+Date and boolean normalisation are not applicable to the current four-column
+dataset.
+
+## 3. Cleaning rules
+
+The cleaning implementation is in:
+
+`src/main/java/co/wethinkcode/healthsafe/cleaning/WardCleaningUtils.java`
+
+It handles:
+
+- Leading and trailing whitespace.
+- Repeated internal whitespace.
+- Ward ID casing, for example `w-05` becomes `W-05`.
+- Wing and department name casing.
+- Department aliases such as `Pediatrics` and `Paediatrics`.
+- Recognised medical acronyms such as `ICU`.
+- Placeholder values such as `N/A`, `TBD`, `unknown` and `-`.
+- Invalid, negative or unrealistic bed counts.
+- The special bed-count value `full`, interpreted as zero.
+
+Invalid bed counts are represented as `null` and accompanied by a note.
+
+## 4. Duplicate handling
+
+Duplicate ward records are grouped using the normalised ward ID.
+
+The record with the highest data-quality score is selected:
+
+| Field | Score |
+|---|---:|
+| Valid bed count | 10 |
+| Populated wing | 1 |
+| Populated department | 1 |
+
+Tied scores are resolved using a secondary ordering of normalised field values.
+The decision therefore does not depend on CSV row order.
+
+Distinct cleaning notes from duplicate records are retained in the merged record.
+
+## 5. Failure handling
+
+The service does not start if:
+
+- The required CSV resource is missing.
+- The CSV header is empty.
+- A required header is missing.
+- The CSV contains no usable ward records.
+
+Individual malformed data rows are skipped and reported. One malformed row does
+not automatically invalidate the rest of the dataset.
+
+## 6. Project structure
+
+```text
+ingestion-service/
+├── pom.xml
+├── README.md
+└── src/
+    ├── main/
+    │   ├── java/co/wethinkcode/healthsafe/
+    │   │   ├── IngestionServiceApp.java
+    │   │   ├── cleaning/
+    │   │   │   └── WardCleaningUtils.java
+    │   │   ├── domain/
+    │   │   │   └── WardRecord.java
+    │   │   └── infrastructure/csv/
+    │   │       └── WardCsvLoader.java
+    │   └── resources/
+    │       └── wards-outdated.csv
+    └── test/java/co/wethinkcode/healthsafe/
+        ├── cleaning/
+        │   └── WardCleaningUtilsTest.java
+        └── infrastructure/csv/
+            └── WardCsvLoaderTest.java
 ```
-w-05,east wing ,PAEDIATRICS,five
+
+## 7. REST API
+
+### Health check
+
+```http
+GET /health
 ```
 
-Expected shape after cleaning (exact field names are up to you — this illustrates
-the *kind* of transform expected, not a fixed schema to match exactly):
+Example:
+
+```powershell
+Invoke-RestMethod http://localhost:7030/health
+```
+
+Expected result:
+
+```text
+OK
+```
+
+### Retrieve cleaned ward records
+
+```http
+GET /wards
+```
+
+Example:
+
+```powershell
+Invoke-RestMethod http://localhost:7030/wards |
+    ConvertTo-Json -Depth 5
+```
+
+Each record exposes:
 
 ```json
 {
-  "wardId": "W-05",
+  "wardId": "W-01",
   "wing": "East Wing",
-  "department": "Paediatrics",
-  "bedsAvailable": null,
-  "notes": "bedsAvailable was non-numeric ('five') — flagged for follow-up"
+  "department": "Cardiology",
+  "bedsAvailable": 3,
+  "notes": null
 }
 ```
 
-Note this row is also a near-duplicate of `W-05` two rows above it (same real ward,
-different ID casing and field values) — deciding how to merge or flag duplicates
-like this is part of the exercise.
+## 8. Build
 
-## Known data issues
+Open PowerShell in the `ingestion-service` directory:
 
-`wards-outdated.csv` is deliberately messy — cleaning it is the point of this service. Look
-out for (and handle) at least:
-
-- **Inconsistent casing** in IDs, names, and status/category values (`Active` /
-  `active` / `ACTIVE`)
-- **Padding** — leading/trailing spaces, and the occasional double space, inside
-  fields
-- **Duplicate records** for the same real-world entity, written with a different ID
-  casing/format and/or slightly different field values
-- **Inconsistent date formats** (`YYYY-MM-DD`, `MM/DD/YYYY`, `DD-MM-YYYY`, one- and
-  two-digit months/days) and outright invalid dates
-- **Missing / placeholder values** — blank fields, `N/A`, `n/a`, `TBD`, `unknown`,
-  `-`, `NaN`
-- **Invalid or non-numeric values** in numeric columns (negative counts, spelled-out
-  numbers, unrealistic values)
-- **Inconsistent boolean/flag representations** (`Y`/`N`, `yes`/`no`, `1`/`0`,
-  `true`/`FALSE`)
-- **Naming/spelling variants** for the same thing (e.g. regional spelling
-  differences, synonyms)
-
-## Project structure
-
-```
-ingestion-service/
-├── pom.xml
-└── src/main/
-    ├── java/co/wethinkcode/healthsafe/IngestionServiceApp.java
-    └── resources/wards-outdated.csv
+```powershell
+mvn clean package
 ```
 
-## Build
+## 9. Run
 
-```
-mvn package
-```
-
-## Run
-
-```
-java -jar target/ingestion-service.jar
+```powershell
+java -jar .\target\ingestion-service.jar
 ```
 
-Listens on port `7030`. Currently just exposes `/health` — the actual CSV
-parsing/cleaning logic is a TODO.
+The service listens on:
 
-## Test
+`http://localhost:7030`
 
-No automated tests yet. Manually verify it's up:
+## 10. Test
 
+Run the complete test suite:
+
+```powershell
+mvn clean test
 ```
-curl http://localhost:7030/health   # -> OK
+
+Run only the cleaning tests:
+
+```powershell
+mvn -Dtest=WardCleaningUtilsTest test
 ```
 
-To add real tests, add JUnit 5 + the Surefire plugin to `pom.xml`, put tests under
-`src/test/java/co/wethinkcode/healthsafe/`, and run `mvn test`.
+Run only the CSV loader tests:
+
+```powershell
+mvn -Dtest=WardCsvLoaderTest test
+```
+
+The tests cover normalisation, invalid values, missing headers, malformed rows,
+empty resources and duplicate resolution.
+
+## 11. Dependencies
+
+- Java 21
+- Maven
+- Javalin 5.6.3
+- OpenCSV 5.9
+- JUnit 5.10.2
